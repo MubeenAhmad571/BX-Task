@@ -1,3 +1,52 @@
+var Shopify = Shopify || {};
+// ---------------------------------------------------------------------------
+// Money format handler
+// ---------------------------------------------------------------------------
+Shopify.money_format = "${{amount}}";
+Shopify.formatMoney = function(cents, format) {
+  if (typeof cents == 'string') { cents = cents.replace('.',''); }
+  var value = '';
+  var placeholderRegex = /\{\{\s*(\w+)\s*\}\}/;
+  var formatString = (format || this.money_format);
+
+  function defaultOption(opt, def) {
+     return (typeof opt == 'undefined' ? def : opt);
+  }
+
+  function formatWithDelimiters(number, precision, thousands, decimal) {
+    precision = defaultOption(precision, 2);
+    thousands = defaultOption(thousands, ',');
+    decimal   = defaultOption(decimal, '.');
+
+    if (isNaN(number) || number == null) { return 0; }
+
+    number = (number/100.0).toFixed(precision);
+
+    var parts   = number.split('.'),
+        dollars = parts[0].replace(/(\d)(?=(\d\d\d)+(?!\d))/g, '$1' + thousands),
+        cents   = parts[1] ? (decimal + parts[1]) : '';
+
+    return dollars + cents;
+  }
+
+  switch(formatString.match(placeholderRegex)[1]) {
+    case 'amount':
+      value = formatWithDelimiters(cents, 2);
+      break;
+    case 'amount_no_decimals':
+      value = formatWithDelimiters(cents, 0);
+      break;
+    case 'amount_with_comma_separator':
+      value = formatWithDelimiters(cents, 2, '.', ',');
+      break;
+    case 'amount_no_decimals_with_comma_separator':
+      value = formatWithDelimiters(cents, 0, '.', ',');
+      break;
+  }
+
+  return formatString.replace(placeholderRegex, value);
+};
+
 function getFocusableElements(container) {
   return Array.from(
     container.querySelectorAll(
@@ -1300,6 +1349,73 @@ class VariantSelects extends HTMLElement {
 
 customElements.define('variant-selects', VariantSelects);
 
+/* Card Product Color Swatches function. It can change variant images, price and other option popup hide/show */
+function cardProductVariantChange() {
+  document.querySelectorAll('.grid__item')?.forEach( card => {
+    card.querySelectorAll('label')?.forEach( label => {
+      label.addEventListener('click', () => {
+        card.querySelector('.media img').src = label.dataset?.variantImage;
+        card.querySelector('.card-product__option-clr-wrapper span').innerText = label.dataset.optionValue;
+        card.querySelector('.price-item--regular').innerText = Shopify.formatMoney(parseInt(label.dataset.variantPrice));
+      });
+    });
+
+    card.querySelector('.bt__quick_atc_variants')?.addEventListener('click', (evt) => {
+      if ( card.querySelector('.bt__quick_atc_variants_box').classList.contains('active')) {
+        card.querySelector('.bt__quick_atc_variants_box').classList.remove('active');
+      } else {
+        card.querySelector('.bt__quick_atc_variants_box').classList.add('active');
+        card.querySelectorAll('.bt__quick_atc_variants_box li').forEach( cardOpt => {
+          if (cardOpt.dataset.option1 === card.querySelector('input:checked').dataset.optionValue || cardOpt.dataset.option2 === card.querySelector('input:checked').dataset.optionValue) {
+            cardOpt.classList.add('active');
+          } else {
+            cardOpt.classList.remove('active');
+          }
+        });
+      }
+    });
+  });
+}
+/* Card Prduct QATC btnn */
+function quickAddToCart() {
+  document.querySelectorAll(".bt__quick_add_to_cart_wrap").forEach( item => {
+    const addToCartHandle = item.querySelectorAll("[data-quick-add-to-cart]"),
+      addToCartForm = item.querySelector("[data-quick-view-form]");
+
+    addToCartHandle.forEach( atcBtn => {
+      atcBtn.addEventListener("click", e => {
+        e.preventDefault(),
+        document.querySelector('.bt__quick_atc_variants_box.active')?.classList.remove('active'),
+        quickAddToCartAPI(addToCartForm),
+        addToCartForm.reset();
+      });
+    });
+
+  });
+}
+/* Custom Cart Notification Rendering func */
+async function quickAddToCartAPI(form) {
+  try {
+    const cartSections = document.querySelector("cart-notification, cart-drawer"),
+      formData = new FormData(form);
+    cartSections &&
+      formData.append(
+        "sections",
+        Array.from(cartSections.getSectionsToRender(), (section) => section.id)
+      ),
+      formData.append("sections_url", window.location.pathname);
+    const resp = await fetch("/cart/add.js", { method: "POST", body: formData });
+    if ((console.log(JSON.stringify(resp)), !resp.ok)) throw new Error("Error While adding to cart");
+    const data = await resp.json();
+    cartSections && cartSections.renderContents(data);
+  } catch (error) {
+    console.log("Quick add to cart error!!!", error);
+  }
+}
+/* Calling Product Cart Color Swatches & QATC Func */
+cardProductVariantChange();
+quickAddToCart();
+
 class ProductRecommendations extends HTMLElement {
   constructor() {
     super();
@@ -1328,6 +1444,8 @@ class ProductRecommendations extends HTMLElement {
           if (html.querySelector('.grid__item')) {
             this.classList.add('product-recommendations--loaded');
           }
+          cardProductVariantChange();
+          quickAddToCart();
         })
         .catch((e) => {
           console.error(e);
